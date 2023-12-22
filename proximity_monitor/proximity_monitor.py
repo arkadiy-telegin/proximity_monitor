@@ -79,6 +79,7 @@ class ProximityMonitorNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     proximity_monitor_node = ProximityMonitorNode()
+    proximity_monitor_node.get_logger().info('Proximity Monitor Node started')
     rclpy.spin(proximity_monitor_node)
     rclpy.shutdown()
 
