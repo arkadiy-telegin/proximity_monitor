@@ -16,7 +16,7 @@ def nearest_point_distance(ros_image):
         depth_image = bridge.imgmsg_to_cv2(ros_image, desired_encoding='passthrough')
         depth_array = np.array(depth_image, dtype=np.float64)
         min_distance = float(np.min(depth_array[depth_array!=0]))
-        return min_distance
+        return min_distance * 0.001  # Convert to meters
     except CvBridgeError as e:
         print(e)
 
@@ -31,7 +31,7 @@ class ProximityMonitorNode(Node):
         # Declare parameters and initialize them
         self.declare_parameter('first_camera_name', 'camera1')
         self.declare_parameter('second_camera_name', 'camera2')
-        self.declare_parameter('threshold', 1.0)
+        self.declare_parameter('threshold', 0.2)
 
         # Get parameters
         self.first_camera_name = self.get_parameter('first_camera_name').get_parameter_value().string_value
@@ -45,8 +45,11 @@ class ProximityMonitorNode(Node):
         self.warning_publisher = self.create_publisher(Float32MultiArray, self.warning_topic, 10)
         # self.second_warning_publisher = self.create_publisher(Float32MultiArray, self.second_warning_topic, 10)
 
-        self.first_camera_subscriber = self.create_subscription(Image, f'{self.first_camera_name}/depth', self.first_camera_callback, 10)
-        self.second_camera_subscriber = self.create_subscription(Image, f'{self.second_camera_name}/depth', self.second_camera_callback, 10)
+        self.first_camera_subscriber = self.create_subscription(Image, f'/{self.first_camera_name}/depth/image_rect_raw', self.first_camera_callback, 10)
+        self.second_camera_subscriber = self.create_subscription(Image, f'/{self.second_camera_name}/depth/image_rect_raw', self.second_camera_callback, 10)
+
+        self.get_logger().info(f'Listening for first camera on /{self.first_camera_name}/depth/image_rect_raw')
+        self.get_logger().info(f'Listening for second camera on /{self.second_camera_name}/depth/image_rect_raw')
 
         self.first_camera_warning = None
         self.second_camera_warning = None
@@ -60,22 +63,31 @@ class ProximityMonitorNode(Node):
 
     def process_camera_data(self, data):
         proximity = nearest_point_distance(data)
-        warning = proximity < self.threshold
-        return proximity, warning
+        relative_proximity = proximity / self.threshold
+        warning = 1.0 if proximity < self.threshold else 0.0
+        return relative_proximity, warning
 
     def first_camera_callback(self, data):
         self.first_camera_proximity, self.first_camera_warning = self.process_camera_data(data)
+        self.get_logger().debug(f'First camera: Proximity: {self.first_camera_proximity}, Warning: {self.first_camera_warning}')
 
     def second_camera_callback(self, data):
         self.second_camera_proximity, self.second_camera_warning = self.process_camera_data(data)
+        self.get_logger().debug(f'Second camera: Proximity: {self.second_camera_proximity}, Warning: {self.second_camera_warning}')
 
     def publish_warning(self):
         warning_msg = Float32MultiArray()
+
+        if self.first_camera_warning:
+            self.get_logger().info(f'Publishing first camera warning: {self.first_camera_proximity}')
+        if self.second_camera_warning:
+            self.get_logger().info(f'Publishing second camera warning: {self.second_camera_proximity}')
+
         warning_msg.data = [
-            self.first_camera_warning,
-            self.first_camera_proximity,
-            self.second_camera_warning,
-            self.second_camera_proximity
+            self.first_camera_warning or float('NaN'),
+            self.first_camera_proximity or float('NaN'),
+            self.second_camera_warning or float('NaN'),
+            self.second_camera_proximity or float('NaN')
         ]
         self.warning_publisher.publish(warning_msg)
 
